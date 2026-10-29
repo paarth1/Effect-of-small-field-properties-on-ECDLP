@@ -1,0 +1,44 @@
+import math
+from fractions import Fraction
+from qiskit import QuantumCircuit
+from qiskit.circuit.library import QFT
+from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2 as Sampler
+from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+N = 15 # composite toy modulus
+a = 7 # gcd(a, N) = 1; ord_N(a) = 4, and 4 divides 2^3 n_count = 3 # 2^3 = 8 distinguishable phases
+def build_circuit():
+qc = QuantumCircuit(n_count + 1, n_count) # one work qubit suffices for q in range(n_count):
+qc.h(q)
+qc.x(n_count) # work register -> |1> for q in range(n_count):
+# ORACLE-ASSISTED demo: the phase is computed classically.
+theta = 2 * math.pi * pow(a, 2**q, N) / N # replace with controlled qc.cp(theta, q, n_count) # modular mult for true Shor
+    qc.append(QFT(n_count, inverse=True), range(n_count))
+    qc.measure(range(n_count), range(n_count))
+    return qc
+def cf_candidates(num, den, r_max):
+    """Continued-fraction convergents of num/den with denominator <= r_max."""
+    h_prev, h, k_prev, k = 0, 1, 1, 0
+    x = num / den
+    out = []
+    for _ in range(16):
+       ai = math.floor(x)
+       h_prev, h = h, ai * h + h_prev
+       k_prev, k = k, ai * k + k_prev
+       if k > r_max or k == 0: break
+       out.append(k)
+       frac = x - ai
+       if frac == 0: break
+       x = 1 / frac
+return out
+def postprocess(counts, N, a, n_count):
+    """Extract candidate periods from measured bitstrings (the step most
+    demonstrations omit)."""
+    found = {}
+    for bits, shots in counts.items():
+       c = int(bits.replace(’ ’, ’’), 2)
+       if c == 0 or shots < 8:
+           continue
+       for r in cf_candidates(c, 2 ** n_count, 2 ** n_count):
+           if r and pow(a, r, N) == 1:
+              found[r] = found.get(r, 0) + shots
+ return found
