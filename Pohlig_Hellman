@@ -1,0 +1,101 @@
+
+import math
+class GeneralWeierstrassCurve:
+    """General Weierstrass curve over F_p:
+      y^2 + a1*x*y + a3*y = x^3 + a2*x^2 + a4*x + a6."""
+    def __init__(self, a1, a2, a3, a4, a6, p):
+       self.a1, self.a2, self.a3, self.a4, self.a6, self.p = a1, a2, a3, a4, a6, p
+       b2 = (a1*a1 + 4*a2) % p
+       b4 = (2*a4 + a1*a3) % p
+       b6 = (a3*a3 + 4*a6) % p
+       b8 = (a1*a1*a6 + 4*a2*a6 - a1*a3*a4 + a2*a3*a3 - a4*a4) % p
+       if (-b2*b2*b8 - 8*b4**3 - 27*b6*b6 + 9*b2*b4*b6) % p == 0:
+           raise ValueError("Curve is singular (zero discriminant).")
+    def neg(self, P):
+       if P is None: return None
+       x, y = P
+       return (x, (-y - self.a1*x - self.a3) % self.p)
+    def point_add(self, P, Q):
+       if P is None: return Q
+       if Q is None: return P
+       x1, y1 = P; x2, y2 = Q
+       if x1 == x2 and (y1 + y2 + self.a1*x1 + self.a3) % self.p == 0:
+ return None # P == -Q
+       if P == Q:
+           num = (3*x1*x1 + 2*self.a2*x1 + self.a4 - self.a1*y1) % self.p
+           den = (2*y1 + self.a1*x1 + self.a3) % self.p
+       else:
+           if x1 == x2: return None
+           num = (y2 - y1) % self.p; den = (x2 - x1) % self.p
+       if den % self.p == 0: return None
+       lam = (num * pow(den, -1, self.p)) % self.p
+       x3 = (lam*lam + self.a1*lam - self.a2 - x1 - x2) % self.p
+       y3 = (-(lam + self.a1)*x3 - self.a3 - y1 + lam*x1) % self.p
+       return (x3, y3)
+    def scalar_mult(self, k, P):
+       R = None
+       if k == 0 or P is None: return R
+       base = P
+       while k > 0:
+           if k & 1: R = self.point_add(R, base)
+           base = self.point_add(base, base)
+           k >>= 1
+return R
+def extended_gcd(a, b):
+    if a == 0: return b, 0, 1
+    g, x1, y1 = extended_gcd(b % a, a)
+    return g, y1 - (b // a) * x1, x1
+def chinese_remainder_theorem(remainders, moduli):
+    total = 1
+for m in moduli: total *= m
+x=0
+for r_i, m_i in zip(remainders, moduli):
+       p = total // m_i
+       _, inv, _ = extended_gcd(p % m_i, m_i)
+       x += r_i * p * inv
+    return x % total
+def ec_bsgs(curve, P, Q, order):
+    """Baby-step giant-step: Q = [x]P with 0 <= x < order. O(sqrt(order))."""
+    m = math.isqrt(order) + 1
+    baby = {}
+    curr = None
+    for j in range(m):
+       baby.setdefault(curr, j)
+       curr = curve.point_add(curr, P)
+    mP = curve.scalar_mult(m, P)
+    for i in range(m):
+       if Q in baby:
+           return (i * m + baby[Q]) % order
+       Q = curve.point_add(Q, curve.neg(mP))
+    return None
+def factorize(n):
+    f, d = {}, 2
+    while d * d <= n:
+       while n % d == 0:
+           f[d] = f.get(d, 0) + 1
+           n //= d
+       d += 1 if d == 2 else 2
+    if n > 1: f[n] = f.get(n, 0) + 1
+    return f
+def ec_pohlig_hellman(curve, P, Q, N, factors):
+    """Pohlig-Hellman with p-adic digit expansion and BSGS sub-solvers.
+    N must be the order of P; factors = {prime: exponent} of N."""
+    remainders, moduli = [], []
+    for prime, exp in factors.items():
+moduli.append(prime ** exp)
+P_base = curve.scalar_mult(N // prime, P) # order prime^exp
+digits = []
+       for k in range(exp):
+           acc = 0
+           for j in range(k):
+              acc += digits[j] * (prime ** j) * (N // (prime ** (k + 1)))
+           gamma = curve.scalar_mult(acc, P)
+           Q_target = curve.scalar_mult(N // (prime ** (k + 1)), Q)
+           Q_isolated = (curve.point_add(Q_target, curve.neg(gamma))
+                       if gamma is not None else Q_target)
+           d_k = ec_bsgs(curve, P_base, Q_isolated, prime)
+           if d_k is None:
+              raise ValueError("Subgroup DLP failed for %d^%d at digit %d" % (prime, exp, k))
+           digits.append(d_k)
+       remainders.append(sum(digits[k] * prime**k for k in range(exp)))
+    return chinese_remainder_theorem(remainders, moduli)
